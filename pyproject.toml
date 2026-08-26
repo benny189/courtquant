@@ -77,6 +77,7 @@ files = ["src", "tests"]
 exclude = ["^notebooks/"]
 
 [tool.pytest.ini_options]
+pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = [
     "-ra",
