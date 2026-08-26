@@ -1,5 +1,8 @@
 """Tests for leakage-resistant walk-forward backtesting."""
 
+from collections.abc import Sequence
+from typing import cast
+
 import pandas as pd
 import pytest
 
@@ -8,7 +11,11 @@ from courtquant.backtesting import (
     BacktestSummary,
     BacktestValidationError,
     summarize_backtest,
+    walk_forward_com_poisson,
     walk_forward_poisson,
+)
+from courtquant.models.com_poisson import (
+    ConwayMaxwellPoissonModel,
 )
 
 
@@ -19,8 +26,22 @@ def _sample_matches() -> pd.DataFrame:
             "saison": ["18/19"] * 6,
             "spieltag": [1, 1, 2, 2, 3, 3],
             "spiel": [1, 2, 1, 2, 1, 2],
-            "tore_mannschaft1": [4, 9, 14, 19, 24, 29],
-            "tore_mannschaft2": [6, 11, 16, 21, 26, 31],
+            "tore_mannschaft1": [
+                4,
+                9,
+                14,
+                19,
+                24,
+                29,
+            ],
+            "tore_mannschaft2": [
+                6,
+                11,
+                16,
+                21,
+                26,
+                31,
+            ],
         }
     )
 
@@ -36,7 +57,14 @@ def _summary_predictions() -> pd.DataFrame:
             "train_start": [0, 0],
             "train_size": [2, 2],
             "observed_total": [10, 20],
-            "predicted_rate": [12.0, 18.0],
+            "model_intensity": [12.0, 18.0],
+            "dispersion_parameter": [1.0, 1.0],
+            "predicted_mean": [12.0, 18.0],
+            "predicted_variance": [12.0, 18.0],
+            "predicted_dispersion_index": [
+                1.0,
+                1.0,
+            ],
             "log_probability": [-2.0, -4.0],
             "negative_log_score": [2.0, 4.0],
             "forecast_error": [2.0, -2.0],
@@ -45,7 +73,7 @@ def _summary_predictions() -> pd.DataFrame:
     )
 
 
-def test_expanding_backtest_uses_matchday_embargo() -> None:
+def test_expanding_poisson_uses_matchday_embargo() -> None:
     predictions = walk_forward_poisson(
         _sample_matches(),
         min_train_size=2,
@@ -53,17 +81,38 @@ def test_expanding_backtest_uses_matchday_embargo() -> None:
 
     assert tuple(predictions.columns) == PREDICTION_COLUMNS
     assert predictions["model"].unique().tolist() == ["poisson_expanding"]
-    assert predictions["observation_index"].tolist() == [2, 3, 4, 5]
+    assert predictions["observation_index"].tolist() == [
+        2,
+        3,
+        4,
+        5,
+    ]
 
     second_matchday = predictions.loc[predictions["spieltag"] == 2]
-    assert second_matchday["predicted_rate"].tolist() == pytest.approx([15.0, 15.0])
-    assert second_matchday["train_size"].tolist() == [2, 2]
-    assert second_matchday["train_start"].tolist() == [0, 0]
+    assert second_matchday["predicted_mean"].tolist() == pytest.approx([15.0, 15.0])
+    assert second_matchday["predicted_variance"].tolist() == pytest.approx([15.0, 15.0])
+    assert second_matchday["predicted_dispersion_index"].tolist() == pytest.approx([1.0, 1.0])
+    assert second_matchday["model_intensity"].tolist() == pytest.approx([15.0, 15.0])
+    assert second_matchday["dispersion_parameter"].tolist() == pytest.approx([1.0, 1.0])
+    assert second_matchday["train_size"].tolist() == [
+        2,
+        2,
+    ]
+    assert second_matchday["train_start"].tolist() == [
+        0,
+        0,
+    ]
 
     third_matchday = predictions.loc[predictions["spieltag"] == 3]
-    assert third_matchday["predicted_rate"].tolist() == pytest.approx([25.0, 25.0])
-    assert third_matchday["train_size"].tolist() == [4, 4]
-    assert third_matchday["train_start"].tolist() == [0, 0]
+    assert third_matchday["predicted_mean"].tolist() == pytest.approx([25.0, 25.0])
+    assert third_matchday["train_size"].tolist() == [
+        4,
+        4,
+    ]
+    assert third_matchday["train_start"].tolist() == [
+        0,
+        0,
+    ]
 
 
 def test_backtest_sorts_matches_chronologically() -> None:
@@ -74,12 +123,27 @@ def test_backtest_sorts_matches_chronologically() -> None:
         min_train_size=2,
     )
 
-    assert predictions["spieltag"].tolist() == [2, 2, 3, 3]
-    assert predictions["spiel"].tolist() == [1, 2, 1, 2]
-    assert predictions["observed_total"].tolist() == [30, 40, 50, 60]
+    assert predictions["spieltag"].tolist() == [
+        2,
+        2,
+        3,
+        3,
+    ]
+    assert predictions["spiel"].tolist() == [
+        1,
+        2,
+        1,
+        2,
+    ]
+    assert predictions["observed_total"].tolist() == [
+        30,
+        40,
+        50,
+        60,
+    ]
 
 
-def test_rolling_backtest_uses_only_requested_window() -> None:
+def test_rolling_poisson_uses_requested_window() -> None:
     predictions = walk_forward_poisson(
         _sample_matches(),
         min_train_size=2,
@@ -89,13 +153,65 @@ def test_rolling_backtest_uses_only_requested_window() -> None:
     assert predictions["model"].unique().tolist() == ["poisson_rolling_2"]
 
     second_matchday = predictions.loc[predictions["spieltag"] == 2]
-    assert second_matchday["predicted_rate"].tolist() == pytest.approx([15.0, 15.0])
-    assert second_matchday["train_start"].tolist() == [0, 0]
+    assert second_matchday["predicted_mean"].tolist() == pytest.approx([15.0, 15.0])
+    assert second_matchday["train_start"].tolist() == [
+        0,
+        0,
+    ]
 
     third_matchday = predictions.loc[predictions["spieltag"] == 3]
-    assert third_matchday["predicted_rate"].tolist() == pytest.approx([35.0, 35.0])
-    assert third_matchday["train_start"].tolist() == [2, 2]
-    assert third_matchday["train_size"].tolist() == [2, 2]
+    assert third_matchday["predicted_mean"].tolist() == pytest.approx([35.0, 35.0])
+    assert third_matchday["train_start"].tolist() == [
+        2,
+        2,
+    ]
+    assert third_matchday["train_size"].tolist() == [
+        2,
+        2,
+    ]
+
+
+def test_com_poisson_backtest_records_dispersion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fitted_model(
+        counts: Sequence[int],
+    ) -> ConwayMaxwellPoissonModel:
+        return ConwayMaxwellPoissonModel(
+            intensity=2_500.0,
+            dispersion=2.0,
+            sample_size=len(counts),
+        )
+
+    monkeypatch.setattr(
+        ConwayMaxwellPoissonModel,
+        "fit",
+        staticmethod(fitted_model),
+    )
+
+    reference = fitted_model([10, 20])
+    expected_mean, expected_variance = reference.moments()
+
+    predictions = walk_forward_com_poisson(
+        _sample_matches(),
+        min_train_size=2,
+        window_size=2,
+    )
+
+    assert predictions["model"].unique().tolist() == ["com_poisson_rolling_2"]
+    assert predictions["model_intensity"].tolist() == pytest.approx([2_500.0] * 4)
+    assert predictions["dispersion_parameter"].tolist() == pytest.approx([2.0] * 4)
+    assert predictions["predicted_mean"].tolist() == pytest.approx([expected_mean] * 4)
+    assert predictions["predicted_variance"].tolist() == pytest.approx([expected_variance] * 4)
+    assert predictions["predicted_dispersion_index"].tolist() == pytest.approx(
+        [expected_variance / expected_mean] * 4
+    )
+    assert predictions["train_size"].tolist() == [
+        2,
+        2,
+        2,
+        2,
+    ]
 
 
 def test_scores_are_internally_consistent() -> None:
@@ -108,13 +224,16 @@ def test_scores_are_internally_consistent() -> None:
         (-predictions["log_probability"]).tolist()
     )
     assert predictions["forecast_error"].tolist() == pytest.approx(
-        (predictions["predicted_rate"] - predictions["observed_total"]).tolist()
+        (predictions["predicted_mean"] - predictions["observed_total"]).tolist()
     )
 
 
-@pytest.mark.parametrize("min_train_size", [0, -1, True])
+@pytest.mark.parametrize(
+    "min_train_size",
+    [0, -1, True, 1.5],
+)
 def test_backtest_rejects_invalid_minimum_training_size(
-    min_train_size: int,
+    min_train_size: object,
 ) -> None:
     with pytest.raises(
         BacktestValidationError,
@@ -122,12 +241,20 @@ def test_backtest_rejects_invalid_minimum_training_size(
     ):
         walk_forward_poisson(
             _sample_matches(),
-            min_train_size=min_train_size,
+            min_train_size=cast(
+                int,
+                min_train_size,
+            ),
         )
 
 
-@pytest.mark.parametrize("window_size", [0, -1, True])
-def test_backtest_rejects_invalid_window_size(window_size: int) -> None:
+@pytest.mark.parametrize(
+    "window_size",
+    [0, -1, True, 1.5],
+)
+def test_backtest_rejects_invalid_window_size(
+    window_size: object,
+) -> None:
     with pytest.raises(
         BacktestValidationError,
         match="window_size must be a positive integer or None",
@@ -135,7 +262,10 @@ def test_backtest_rejects_invalid_window_size(window_size: int) -> None:
         walk_forward_poisson(
             _sample_matches(),
             min_train_size=2,
-            window_size=window_size,
+            window_size=cast(
+                int,
+                window_size,
+            ),
         )
 
 
@@ -176,7 +306,9 @@ def test_summarize_backtest_calculates_expected_metrics() -> None:
         root_mean_squared_error=2.0,
         forecast_bias=0.0,
         mean_observed_total=15.0,
-        mean_predicted_rate=15.0,
+        mean_predicted_total=15.0,
+        mean_predicted_variance=15.0,
+        mean_predicted_dispersion_index=1.0,
     )
 
 

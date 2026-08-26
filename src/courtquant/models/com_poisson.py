@@ -169,27 +169,50 @@ class ConwayMaxwellPoissonModel:
         def gradient(parameters: FloatArray) -> FloatArray:
             return objective_and_gradient(parameters)[1]
 
+        parameter_bounds = [
+            (
+                log(1e-6),
+                log(maximum_location),
+            ),
+            (
+                log(MINIMUM_DISPERSION),
+                log(MAXIMUM_DISPERSION),
+            ),
+        ]
         result = minimize(
             objective,
             initial_parameters,
             method="L-BFGS-B",
             jac=gradient,
-            bounds=[
-                (log(1e-6), log(maximum_location)),
-                (
-                    log(MINIMUM_DISPERSION),
-                    log(MAXIMUM_DISPERSION),
-                ),
-            ],
+            bounds=parameter_bounds,
             options={
                 "maxiter": 500,
+                "maxls": 50,
                 "ftol": 1e-12,
                 "gtol": 1e-8,
             },
         )
 
         if not bool(result.success):
-            raise ComPoissonConvergenceError(f"COM-Poisson optimization failed: {result.message}")
+            result = minimize(
+                objective,
+                np.asarray(
+                    result.x,
+                    dtype=np.float64,
+                ),
+                method="SLSQP",
+                jac=gradient,
+                bounds=parameter_bounds,
+                options={
+                    "maxiter": 500,
+                    "ftol": 1e-12,
+                },
+            )
+
+        if not bool(result.success):
+            raise ComPoissonConvergenceError(
+                f"COM-Poisson optimization failed after L-BFGS-B and SLSQP: {result.message}"
+            )
 
         optimum = np.asarray(result.x, dtype=np.float64)
         dispersion = exp(float(optimum[1]))

@@ -463,3 +463,47 @@ def test_normalizer_handles_ratio_rounded_to_one(
             tail_tolerance=1e-12,
             maximum_support=1,
         )
+
+
+def test_fit_uses_slsqp_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    methods: list[str] = []
+
+    def staged_minimize(
+        *_args: object,
+        **kwargs: object,
+    ) -> SimpleNamespace:
+        methods.append(str(kwargs.get("method")))
+
+        if len(methods) == 1:
+            return SimpleNamespace(
+                success=False,
+                message="L-BFGS-B line-search failure",
+                x=np.asarray(
+                    [log(5.0), 0.0],
+                    dtype=np.float64,
+                ),
+            )
+
+        return SimpleNamespace(
+            success=True,
+            message="SLSQP success",
+            x=np.asarray(
+                [log(5.0), 0.0],
+                dtype=np.float64,
+            ),
+        )
+
+    monkeypatch.setattr(
+        com_poisson,
+        "minimize",
+        staged_minimize,
+    )
+
+    fitted = ConwayMaxwellPoissonModel.fit([4, 5, 6])
+
+    assert methods == ["L-BFGS-B", "SLSQP"]
+    assert fitted.intensity == pytest.approx(5.0)
+    assert fitted.dispersion == pytest.approx(1.0)
+    assert fitted.sample_size == 3
