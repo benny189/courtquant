@@ -1,0 +1,2 @@
+baseline_model,candidate_model,predictions,matchdays,baseline_mean_negative_log_score,candidate_mean_negative_log_score,mean_score_difference,relative_improvement_percent,confidence_interval_low,confidence_interval_high,candidate_win_probability,bootstrap_samples,confidence_level
+poisson_rolling_306,com_poisson_rolling_306,1330,144,3.30401574644314,3.2855761615611185,-0.018439584882021354,0.5580961562266177,-0.030803016374207758,-0.005324544339131087,0.9966,20000,0.95
